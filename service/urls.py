@@ -16,27 +16,8 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 
-from {{ project_name }} import views as api_views
-from {{ project_name }}.views import ProductViewSet
-
-product_list = ProductViewSet.as_view({
-    'get': 'list',
-    'post': 'create'
-})
-product_detail = ProductViewSet.as_view({
-    'get': 'retrieve',
-    'put': 'update',
-    'patch': 'partial_update',
-    'delete': 'destroy'
-})
-
 urlpatterns = [
     path("admin/", admin.site.urls),
     path('o/', include('oauth2_provider.urls', namespace='oauth2_provider')),
-    path('register/', api_views.RegistrationView.as_view(), name='register'),
-    path('login/', api_views.LoginView.as_view(), name='login'),
-    path('reset-password/<slug:token>/', api_views.ResetPasswordView.as_view(), name='reset-password'),
-    path('forgot-password/', api_views.ForgotPasswordView.as_view(), name='forgot-password'),
-    path('products/', product_list, name='product-list'),
-    path('products/<int:pk>/', product_detail, name='product-detail'),
+    path('', include('{{ project_name }}.urls')),
 ]
