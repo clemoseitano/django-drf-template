@@ -7,10 +7,9 @@ This is a basic django project with django-rest-framework.
 To run the project, you can run the following commands:
 - `DB_NAME, DB_HOST,DB_PORT, DB_USER, DB_PASSWORD, APPLICATION_NAME,
 LOG_LEVEL, SECRET_KEY, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD,
-EMAIL_TIMEOUT, BASE_URL` should be set in order to run it properly.
-- Migrations for Product and EmailToken have been created for a 
-fully functional application out of the box. Remove the models, serializers, 
-views and the tasks that reference them, in case you don't need them.
+EMAIL_TIMEOUT, BASE_URL, PASSWORD_RESET_TIMEOUT` should be set in order to run it properly.
+
+
 - `python manage.py migrate`
 - `python manage.py createsuperuser`
 - `python manage.py runserver`

@@ -1,10 +1,17 @@
 import secrets
-import secrets
 import time
+import json
+import uuid
 
 from django.conf import settings
-from django.contrib.auth import authenticate
 from django.contrib.auth.models import AnonymousUser, User
+from django.contrib.auth import authenticate, password_validation
+from django.contrib.sites.shortcuts import get_current_site
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes, force_str
+from django.contrib import messages
+from django.core.exceptions import ValidationError
+
 from rest_framework import generics, permissions, viewsets
 from rest_framework.response import Response
 from rest_framework.status import HTTP_200_OK, HTTP_400_BAD_REQUEST, HTTP_401_UNAUTHORIZED, HTTP_404_NOT_FOUND, \
@@ -12,9 +19,10 @@ from rest_framework.status import HTTP_200_OK, HTTP_400_BAD_REQUEST, HTTP_401_UN
 from rest_framework.views import APIView
 
 from {{ project_name }} import services
-from {{ project_name }}.models import Product, EmailToken
+from {{ project_name }}.models import Product
 from {{ project_name }}.permissions import IsOwnerOrStaff
 from {{ project_name }}.serializers import RegistrationSerializer, LoginSerializer, ProductSerializer
+from {{ project_name }}.utils import account_activation_token, password_reset_token
 
 
 class RegistrationView(generics.CreateAPIView):
@@ -27,6 +35,26 @@ class RegistrationView(generics.CreateAPIView):
             serializer.save()
             return Response({"success": "User registered successfully"}, status=HTTP_200_OK)
         return Response(serializer.errors, status=HTTP_400_BAD_REQUEST)
+
+
+class ActivateAccountView(generics.CreateAPIView):
+    def post(self, request, uidb64, token):
+        try:
+            uid = force_str(urlsafe_base64_decode(uidb64))
+            user = User.objects.get(pk=uid)
+        except(TypeError, ValueError, OverflowError, User.DoesNotExist):
+            user = None
+
+        if user is not None and account_activation_token.check_token(user, token):
+            user.is_active = True
+            user.save()
+
+            messages.success(request, "Your email has been verified successfully. Now you can login to your account.")
+            return Response({"success": "User email verified successfully"}, status=HTTP_200_OK)
+
+        else:
+            messages.error(request, "Activation link is invalid!")
+            return Response({"error": "Activation link is invalid!"}, status=HTTP_404_NOT_FOUND)
 
 
 class LoginView(generics.CreateAPIView):
@@ -53,52 +81,45 @@ class ForgotPasswordView(APIView):
         email = request.data.get("email", "")
         user = User.objects.filter(email=email)
         if not user:
-            return Response({"error": "Invalid email"}, status=HTTP_401_UNAUTHORIZED)
+            return Response({"error": "Invalid email"}, status=HTTP_404_NOT_FOUND)
 
-        email_token = secrets.token_urlsafe()
+        email_token = str(uuid.uuid4())
+        site_url = get_current_site().domain
+        template_args = {
+            'user': user.username,
+            'domain': site_url,
+            'uid': urlsafe_base64_encode(force_bytes(user.pk)),
+            'token': password_reset_token.make_token(user),
+        }
+        task_args = [
+            email, "Password Reset", "password_reset_email.html",
+            json.dumps(template_args), email_token
+        ]
 
-        expiry = int(time.time()) + int(settings.EMAIL_TIMEOUT)
-        EmailToken.objects.create(
-            token=email_token,
-            user=user.first(),
-            expires_at=expiry)
-
-        # Set a task for celery to execute in the background
-        from django_celery_beat.models import IntervalSchedule, PeriodicTask
-        import json
-        schedule, created = IntervalSchedule.objects.get_or_create(
-            every=15,
-            period=IntervalSchedule.SECONDS,
-        )
-
-        PeriodicTask.objects.create(
-            interval=schedule,
-            name=email_token,
-            task="{{ project_name }}.tasks.send_mails",
-            args=json.dumps([email, email_token]),
-        )
+        services.schedule_email(task_args, email_token)
         return Response({'success': f'Email will be sent to {email} in a moment'}, status=HTTP_200_OK)
 
 
 class ResetPasswordView(APIView):
     permission_classes = [permissions.AllowAny]
 
-    def post(self, request, token):
-        tokens = EmailToken.objects.filter(token=token)
-        if not tokens:
-            return Response({"error": "Not found"}, status=HTTP_404_NOT_FOUND)
-        used_token = tokens.first()
-        password = request.data.get("password")
-        if not password:
-            return Response({"error": "Password must be provided"}, status=HTTP_400_BAD_REQUEST)
-        if not used_token.is_expired and used_token.expires_at >= int(time.time()):
-            user = used_token.user
+    def post(self, request, uidb64, token):
+        try:
+            uid = force_str(urlsafe_base64_decode(uidb64))
+            user = User.objects.get(pk=uid)
+        except(TypeError, ValueError, OverflowError, User.DoesNotExist):
+            user = None
+
+        if user is not None and password_reset_token.check_token(user, token):
+            password = request.data.get("password")
+            try:
+                password_validation.validate_password(password, user=user)
+            except ValidationError as e:
+                return Response({"error": e.errors}, status=HTTP_400_BAD_REQUEST)
             user.set_password(password)
             user.save()
-            used_token.is_expired = True
-            used_token.save()
-            return Response({'success': 'Password reset successful'}, status=HTTP_200_OK)
-        return Response({'success': 'Email verification link has expired'}, status=HTTP_408_REQUEST_TIMEOUT)
+            return Response({'success': 'Password updated successfully'}, status=HTTP_200_OK)
+        return Response({'error': 'Password could not be updated'}, status=HTTP_408_REQUEST_TIMEOUT)
 
 
 class ProductViewSet(viewsets.ModelViewSet):

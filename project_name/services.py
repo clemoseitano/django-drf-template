@@ -1,3 +1,4 @@
+import uuid
 from datetime import timedelta
 
 import django
@@ -31,3 +32,22 @@ def generate_access_token(user):
         'refresh_token': refresh_token.token,
         'scope': scopes}
     return token
+
+
+def schedule_email(args, email_id):
+    from django_celery_beat.models import IntervalSchedule, PeriodicTask
+    import json
+
+
+    # Set a task for celery to execute in the background
+    schedule, created = IntervalSchedule.objects.get_or_create(
+        every=15,
+        period=IntervalSchedule.SECONDS,
+    )
+
+    PeriodicTask.objects.create(
+        interval=schedule,
+        name=email_id,
+        task="{{ project_name }}.tasks.send_mails",
+        args=json.dumps(args),
+    )
