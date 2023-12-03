@@ -1,17 +1,30 @@
 version: "3.9"
 services:
   web:
+    container_name: 'web-service'
     build: .
     ports:
       - "8000:8000"
     depends_on:
-      - db
-    command: python manage.py runserver 0.0.0.0:8000
+      db:
+        condition: service_healthy
+
+    command: /bin/sh -c "pip install -r requirements.txt && python manage.py migrate && python manage.py collectstatic --noinput && daphne service.asgi:application --port 8000 --bind 0.0.0.0 -v 1"
     volumes:
       - .:/code
+    networks:
+      - rabbitmq_go_net
+    environment:
+      ENV_PATH: .docker.env
+
   rabbitmq:
     image: rabbitmq:3.12-rc
     container_name: 'rabbitmq'
+    healthcheck:
+      test: [ "CMD-SHELL", "rabbitmq-diagnostics -q ping" ]
+      interval: 30s
+      timeout: 30s
+      retries: 3
     ports:
       - 5672:5672
       - 15672:15672
@@ -20,20 +33,51 @@ services:
       - ~/.docker-conf/rabbitmq/log/:/var/log/rabbitmq
     networks:
       - rabbitmq_go_net
-  celery_tasks:
+
+  celery_worker:
     build: .
-    command: celery -A service beat -l INFO  --scheduler django_celery_beat.schedulers:DatabaseScheduler && celery -A service worker -l INFO
+    container_name: 'celery-worker'
+    command: celery -A service worker -l INFO
     depends_on:
-      - rabbitmq
-      - db
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - rabbitmq_go_net
+
+  celery_beat:
+    build: .
+    container_name: 'celery-beat'
+    command: celery -A service beat -l INFO  --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - rabbitmq_go_net
+
   db:
+    env_file:
+      - .docker.env
+    ports:
+      - 5432:5432
     image: postgres:14
+    container_name: 'db'
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $$DB_USER -d $$DB_NAME -h db -p 5432" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     volumes:
       - postgres_data:/var/lib/postgresql/data/
-    environment:
-      - "POSTGRES_HOST_AUTH_METHOD=trust"
+    networks:
+      - rabbitmq_go_net
+
 networks:
   rabbitmq_go_net:
     driver: bridge
+
 volumes:
   postgres_data:

@@ -16,6 +16,7 @@ import logging.config
 from dotenv import load_dotenv
 
 load_dotenv()
+load_dotenv(os.environ.get("ENV_PATH", ".env"))
 
 CONFIG_VARIABLES = ["DB_NAME", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD"]
 
@@ -38,7 +39,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get("SECRET_KEY")
 APPLICATION_NAME = os.environ.get("APPLICATION_NAME")
-BASE_URL = os.environ.get("BASE_URL")
+DB_HOST = os.environ.get("DB_HOST")
+DB_NAME = os.environ.get("DB_NAME")
+DB_USER = os.environ.get("DB_USER")
+DB_PASSWORD = os.environ.get("DB_PASSWORD")
+DB_PORT = os.environ.get("DB_PORT")
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL')
+CELERY_RESULT_BACKEND = 'django-db'
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
