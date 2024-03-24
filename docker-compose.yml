@@ -1,60 +1,13 @@
 version: "3.9"
+name: "fc-backend"
 services:
   web:
-    container_name: 'web-service'
+    environment:
+      - SERVICE_TYPE=web
+    container_name: 'web'
     build: .
     ports:
       - "8000:8000"
-    depends_on:
-      db:
-        condition: service_healthy
-
-    command: /bin/sh -c "pip install -r requirements.txt && python manage.py migrate && python manage.py collectstatic --noinput && daphne service.asgi:application --port 8000 --bind 0.0.0.0 -v 1"
-    volumes:
-      - .:/code
-    networks:
-      - rabbitmq_go_net
-    environment:
-      ENV_PATH: .docker.env
-
-  rabbitmq:
-    image: rabbitmq:3.12-rc
-    container_name: 'rabbitmq'
-    healthcheck:
-      test: [ "CMD-SHELL", "rabbitmq-diagnostics -q ping" ]
-      interval: 30s
-      timeout: 30s
-      retries: 3
-    ports:
-      - 5672:5672
-      - 15672:15672
-    volumes:
-      - ~/.docker-conf/rabbitmq/data/:/var/lib/rabbitmq/
-      - ~/.docker-conf/rabbitmq/log/:/var/log/rabbitmq
-    networks:
-      - rabbitmq_go_net
-
-  celery_worker:
-    build: .
-    container_name: 'celery-worker'
-    command: celery -A service worker -l INFO
-    depends_on:
-      db:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    networks:
-      - rabbitmq_go_net
-
-  celery_beat:
-    build: .
-    container_name: 'celery-beat'
-    command: celery -A service beat -l INFO  --scheduler django_celery_beat.schedulers:DatabaseScheduler
-    depends_on:
-      db:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
     networks:
       - rabbitmq_go_net
 
@@ -62,7 +15,7 @@ services:
     env_file:
       - .docker.env
     ports:
-      - 5432:5432
+      - "5432:5432"
     image: postgres:14
     container_name: 'db'
     healthcheck:
@@ -75,9 +28,51 @@ services:
     networks:
       - rabbitmq_go_net
 
+  rabbitmq:
+    build:
+      context: .
+      dockerfile: Dockerfile.rabbitmq
+    container_name: 'rabbitmq'
+    healthcheck:
+      test: [ "CMD-SHELL", "rabbitmq-diagnostics -q ping" ]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - ~/.docker-conf/rabbitmq/data/:/var/lib/rabbitmq/
+      - ~/.docker-conf/rabbitmq/log/:/var/log/rabbitmq
+    networks:
+      - rabbitmq_go_net
+
+  celery-worker:
+    environment:
+      - SERVICE_TYPE=celery-worker
+    build: .
+    container_name: 'celery-worker'
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - rabbitmq_go_net
+
+  celery-beat:
+    environment:
+      - SERVICE_TYPE=celery-beat
+    build: .
+    container_name: 'celery-beat'
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - rabbitmq_go_net
+
 networks:
   rabbitmq_go_net:
     driver: bridge
+
 
 volumes:
   postgres_data:
